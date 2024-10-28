@@ -69,109 +69,134 @@ def two_way_trading_online(m, M, longueur, sol_online, day, trades_done, max_tra
   
     """
 
-    # We need to plan ahead to maximize profit within constraints.
-    # Since we cannot know future prices in an online setting,
-    # we'll use a deterministic heuristic based on moving averages.
+    # Constants for adjusting delta
+    global observed_prices, observed_returns, observed_min_price, observed_max_price
 
-    global observed_min_price, observed_max_price, observed_prices
-
-    # Initialize observed prices on the first day
-    if day == 0 or observed_min_price is None or observed_max_price is None or observed_prices is None:
+    # Initialize observed prices and returns
+    if 'observed_prices' not in globals() or day == 0:
+        observed_prices = [taux]
+        observed_returns = []
         observed_min_price = taux
         observed_max_price = taux
-        observed_prices = [taux]
     else:
         observed_prices.append(taux)
+        # Calculate daily return (log return)
+        prev_price = observed_prices[-2]
+        daily_return = np.log(taux / prev_price)
+        observed_returns.append(daily_return)
+        # Update observed min and max prices
+        observed_min_price = min(observed_min_price, taux)
+        observed_max_price = max(observed_max_price, taux)
 
-    max_min_ratio = observed_max_price/observed_min_price
-    if (longueur-len(observed_prices)) != 0:
-        trades_date_ratio = (max_trade_bound-trades_done)/(longueur-len(observed_prices))
-    else:
-        trades_date_ratio = max_trade_bound-trades_done
+    # Calculate trades left and days left
+    trades_left = max_trade_bound - trades_done
+    days_left = longueur - day  # Include current day
 
-    if max_min_ratio >= 16:
-        if trades_date_ratio >= 0.25:
-            buy_delta = 0.125
-            sell_delta = 7
-        else:
-            buy_delta = 0.125/2
-            sell_delta = 15
-    elif max_min_ratio >= 8:
-        if trades_date_ratio >= 0.25:
-            buy_delta = 0.25
-            sell_delta = 3
-        else:
-            buy_delta = 0.125
-            sell_delta = 7
-    elif max_min_ratio >= 4:
-        if trades_date_ratio >= 0.25:
-            buy_delta = 0.34
-            sell_delta = 2
-        else:
-            buy_delta = 0.125
-            sell_delta = 3
-    else:
-        if trades_date_ratio >= 0.25:
-            buy_delta = 0.34
-            sell_delta = 1.5
-        else:
-            buy_delta = 0.2
-            sell_delta = 3
-    
-    # Additional logic for detecting peaks and troughs
-    recent_prices = observed_prices[-3:]  # Look back at the last 5 prices
-    if (longueur-len(observed_prices)) != 0:
-        if len(recent_prices) >= 3 and (trades_date_ratio > 0.25):
-            max_recent_price = max(recent_prices)
-            min_recent_price = min(recent_prices)
+    # Check if there have been less than 5 days
+    if len(observed_returns) < 5:
+        # Use the deterministic approach provided earlier
+        delta = min(0.2, 1.0 / (max_trade_bound + 1))
 
-            # If price is at a local minimum, consider buying
-            if taux == min_recent_price and taux_achat == TRANSATION_CLOSED and trades_done + 1 <= max_trade_bound:
-                # Update observed prices
+        if taux_achat == TRANSATION_CLOSED:
+            if day < longueur - 1:
                 observed_min_price = min(observed_min_price, taux)
                 observed_max_price = max(observed_max_price, taux)
-                # Buy shares
-                taux_achat = achat(taux, taux_achat, trades_done, max_trade_bound, sol_online)
-                # Reset observed prices after buying
-                observed_min_price = taux
-                observed_max_price = taux
-
-            # If price is at a local maximum, consider selling
-            elif taux == max_recent_price and taux_achat != TRANSATION_CLOSED:
+                if trades_done + 1 <= max_trade_bound:
+                    if taux <= observed_max_price * (1 - delta):
+                        # Buy shares
+                        taux_achat = achat(taux, taux_achat, trades_done, max_trade_bound, sol_online)
+                        # Reset observed prices after buying
+                        observed_min_price = taux
+                        observed_max_price = taux
+        else:
+            observed_min_price = min(observed_min_price, taux)
+            observed_max_price = max(observed_max_price, taux)
+            if taux >= taux_achat * (1 + delta):
                 # Sell shares
                 sol_online, taux_achat, trades_done = vente(taux, taux_achat, trades_done, sol_online)
                 # Reset observed prices after selling
                 observed_min_price = taux
                 observed_max_price = taux
-
-    if taux_achat == TRANSATION_CLOSED:
-        # We have capital, can decide to buy
-        # Do not buy on the last day
-        if day < longueur - 1:
-            # Update observed prices
-            observed_min_price = min(observed_min_price, taux)
-            observed_max_price = max(observed_max_price, taux)
-            # Check if we have enough transaction capacity
-            if trades_done + 1 <= max_trade_bound:
-                if taux <= observed_max_price * (buy_delta) or taux == 1:
-                    # Buy shares
-                    taux_achat = achat(taux, taux_achat, trades_done, max_trade_bound, sol_online)
-                    # Reset observed prices after buying
-                    observed_min_price = taux
-                    observed_max_price = taux
+            elif day == longueur - 1:
+                # Last day, must sell remaining shares
+                sol_online, taux_achat, trades_done = vente(taux, taux_achat, trades_done, sol_online)
     else:
-        # We have shares, can decide to sell
-        observed_min_price = min(observed_min_price, taux)
-        observed_max_price = max(observed_max_price, taux)
-        if taux >= taux_achat * (1 + sell_delta) :
-            # Sell shares
-            sol_online, taux_achat, trades_done = vente(taux, taux_achat, trades_done, sol_online)
-            # Reset observed prices after selling
-            observed_min_price = taux
-            observed_max_price = taux
-        elif day == longueur - 1:
-            # Last day, must sell remaining shares
-            sol_online, taux_achat, trades_done = vente(taux, taux_achat, trades_done, sol_online)
+        # Enhanced Monte Carlo simulation approach
+        ratio = trades_left / days_left if days_left > 0 else trades_left
+
+        # Adjust conservatism based on ratio
+        base_buy_threshold = 0.05  # Base required expected return to consider buying (5%)
+        base_sell_threshold = -0.02  # Base required expected return to consider selling (-2%)
+        k_buy = 0.1  # Sensitivity for adjusting buy threshold
+        k_sell = 0.1  # Sensitivity for adjusting sell threshold
+        buy_threshold = max(base_buy_threshold + k_buy * ratio, base_buy_threshold)
+        sell_threshold = min(base_sell_threshold - k_sell * (1 / (ratio + 1e-6)), base_sell_threshold)
+
+        # EWMA for parameter estimation
+        lambda_ewma = 0.94  # Decay factor
+        returns_array = np.array(observed_returns)
+        weights = np.array([(1 - lambda_ewma) * lambda_ewma**i for i in range(len(returns_array)-1, -1, -1)])
+        weights /= weights.sum()
+
+        # Weighted average for drift (mu)
+        mu = np.sum(weights * returns_array)
+
+        # Weighted standard deviation for volatility (sigma)
+        weighted_mean_return = mu
+        weighted_squared_diffs = weights * (returns_array - weighted_mean_return)**2
+        sigma = np.sqrt(np.sum(weighted_squared_diffs))
+
+        if sigma == 0:
+            sigma = 1e-6  # Avoid division by zero
+
+        # Adjust buy threshold based on days_left and sigma
+        days_left_threshold = 3  # Days left considered as 'few'
+        sigma_threshold = 0.01   # Volatility considered as 'low'
+        k_days = 0.01            # Sensitivity factor for days left
+        k_sigma = 0.02           # Sensitivity factor for volatility
+
+        if days_left <= days_left_threshold:
+            buy_threshold += k_days * (days_left_threshold - days_left + 1)
+        if sigma <= sigma_threshold:
+            buy_threshold += k_sigma * (sigma_threshold - sigma) / sigma_threshold
+
+        # Monte Carlo Simulation with Antithetic Variates
+        num_simulations = 500
+        S0 = taux
+        dt = 1
+        future_prices = []
+
+        for _ in range(num_simulations // 2):  # Using antithetic variates
+            Z = np.random.normal(0, 1, days_left)
+            Z_antithetic = -Z  # Antithetic variates
+            for Z_values in [Z, Z_antithetic]:
+                price = S0
+                for z in Z_values:
+                    dW = z * np.sqrt(dt)
+                    price *= np.exp((mu - 0.5 * sigma**2) * dt + sigma * dW)
+                future_prices.append(price)
+
+        expected_price = np.mean(future_prices)
+        expected_return = (expected_price - taux) / taux
+
+        action = 'hold'
+        if taux_achat == TRANSATION_CLOSED and trades_left > 0:
+            if expected_return >= buy_threshold:
+                action = 'buy'
+        elif taux_achat != TRANSATION_CLOSED:
+            if expected_return <= sell_threshold:
+                action = 'sell'
+
+        # Ensure we always sell on the last day if holding shares
+        if day == longueur - 1:
+            if taux_achat != TRANSATION_CLOSED:
+                # Last day, sell any remaining shares
+                sol_online, taux_achat, trades_done = vente(taux, taux_achat, trades_done, sol_online)
+        else:
+            if action == 'buy' and taux_achat == TRANSATION_CLOSED and trades_left > 0:
+                taux_achat = achat(taux, taux_achat, trades_done, max_trade_bound, sol_online)
+            elif action == 'sell' and taux_achat != TRANSATION_CLOSED:
+                sol_online, taux_achat, trades_done = vente(taux, taux_achat, trades_done, sol_online)
 
     return sol_online, taux_achat, trades_done
 
