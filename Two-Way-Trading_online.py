@@ -117,16 +117,24 @@ def two_way_trading_online(m, M, longueur, sol_online, day, trades_done, max_tra
         else:
             buy_delta = 0.2
             sell_delta = 3
-    
+
+    if trades_date_ratio >= 0.25:
+        sell_threshold = M * 0.8
+        buy_threshold = M * 0.2
+    else:
+        sell_threshold = M
+        buy_threshold = M * 0.1
+
+
     # Additional logic for detecting peaks and troughs
-    recent_prices = observed_prices[-3:]  # Look back at the last 5 prices
+    recent_prices = observed_prices[-3:]  # Look back at the last 3 prices
     if (longueur-len(observed_prices)) != 0:
-        if len(recent_prices) >= 3 and (trades_date_ratio > 0.25):
+        if len(recent_prices) >= 3 and (trades_date_ratio > 0.27):
             max_recent_price = max(recent_prices)
             min_recent_price = min(recent_prices)
 
             # If price is at a local minimum, consider buying
-            if taux == min_recent_price and taux_achat == TRANSATION_CLOSED and trades_done + 1 <= max_trade_bound:
+            if taux == min_recent_price and taux_achat == TRANSATION_CLOSED and trades_done + 1 <= max_trade_bound and taux <= M*0.8:
                 # Update observed prices
                 observed_min_price = min(observed_min_price, taux)
                 observed_max_price = max(observed_max_price, taux)
@@ -137,7 +145,7 @@ def two_way_trading_online(m, M, longueur, sol_online, day, trades_done, max_tra
                 observed_max_price = taux
 
             # If price is at a local maximum, consider selling
-            elif taux == max_recent_price and taux_achat != TRANSATION_CLOSED:
+            elif taux == max_recent_price and taux_achat != TRANSATION_CLOSED and taux >= M**(1/3)*0.8:
                 # Sell shares
                 sol_online, taux_achat, trades_done = vente(taux, taux_achat, trades_done, sol_online)
                 # Reset observed prices after selling
@@ -153,7 +161,7 @@ def two_way_trading_online(m, M, longueur, sol_online, day, trades_done, max_tra
             observed_max_price = max(observed_max_price, taux)
             # Check if we have enough transaction capacity
             if trades_done + 1 <= max_trade_bound:
-                if taux <= observed_max_price * (buy_delta) or taux == 1:
+                if taux <= observed_max_price * (buy_delta) or taux == m or taux <= buy_threshold:
                     # Buy shares
                     taux_achat = achat(taux, taux_achat, trades_done, max_trade_bound, sol_online)
                     # Reset observed prices after buying
@@ -163,7 +171,7 @@ def two_way_trading_online(m, M, longueur, sol_online, day, trades_done, max_tra
         # We have shares, can decide to sell
         observed_min_price = min(observed_min_price, taux)
         observed_max_price = max(observed_max_price, taux)
-        if taux >= taux_achat * (1 + sell_delta) :
+        if taux >= taux_achat * (1 + sell_delta) or taux == M or taux >= sell_threshold:
             # Sell shares
             sol_online, taux_achat, trades_done = vente(taux, taux_achat, trades_done, sol_online)
             # Reset observed prices after selling
