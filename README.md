@@ -36,7 +36,7 @@ The core challenge is to make profitable trades using only the information avail
 To test the algorithm with a sample input, use the following command:
 
 ```bash
-python main.py --input_dir path/to/input_data --output_dir path/to/output_results
+python Two-Way-Trading_online.py path/to/input_data path/to/output_results
 ```
 
 Replace `path/to/input_data` with the path to your input files and `path/to/output_results` with the desired location for output results. This command will process the trading data as outlined above, saving results and metrics to the specified `output_dir`.
